@@ -137,3 +137,8 @@ class FDRVerificationActionSerializer(serializers.Serializer):
         default=list,
         help_text="Flagged mismatches between OCR and submitted form data"
     )
+    field_overrides = serializers.DictField(
+        required=False,
+        default=dict,
+        help_text="Dictionary of field values manually overridden or confirmed by official during verification"
+    )

@@ -1,6 +1,15 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, FileText, PlusCircle, RefreshCw, AlertCircle, Building2 } from 'lucide-react';
+import {
+  LayoutDashboard,
+  FileText,
+  PlusCircle,
+  RefreshCw,
+  AlertCircle,
+  Building2,
+  ShieldAlert,
+  ShieldCheck
+} from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
 interface SidebarProps {
@@ -10,8 +19,9 @@ interface SidebarProps {
 
 export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
   const { user } = useAuth();
+  const isOfficialOrAdmin = user?.role === 'OFFICIAL' || user?.role === 'ADMIN';
 
-  const navLinks = [
+  const institutionLinks = [
     {
       to: '/dashboard',
       label: 'Institution Dashboard',
@@ -44,6 +54,41 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
     },
   ];
 
+  const officialLinks = [
+    {
+      to: '/official/dashboard',
+      label: 'Official Overview',
+      icon: LayoutDashboard,
+      badge: null,
+    },
+    {
+      to: '/official/verification-queue',
+      label: 'Verification Queue',
+      icon: ShieldAlert,
+      badge: 'Action',
+    },
+    {
+      to: '/official/institutions',
+      label: 'Institutions Master',
+      icon: Building2,
+      badge: null,
+    },
+    {
+      to: '/fdrs',
+      label: 'System FDR Register',
+      icon: FileText,
+      badge: null,
+    },
+    {
+      to: '/renewals-releases',
+      label: 'Renewals & Releases',
+      icon: RefreshCw,
+      badge: null,
+    },
+  ];
+
+  const navLinks = isOfficialOrAdmin ? officialLinks : institutionLinks;
+
   return (
     <>
       {/* Mobile Backdrop */}
@@ -60,20 +105,35 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
         }`}
       >
         <div className="p-4 space-y-6">
-          {/* Institutional Info Header */}
-          {user?.institution && (
+          {/* Institutional / Official Info Header */}
+          {isOfficialOrAdmin ? (
             <div className="bg-slate-800/60 p-3 rounded-lg border border-slate-700/50">
               <div className="flex items-center space-x-2 text-xs text-[#e09f3e] font-semibold uppercase tracking-wider">
-                <Building2 className="w-3.5 h-3.5" />
-                <span>Institute Portal</span>
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>AICTE Official Portal</span>
               </div>
               <div className="text-sm font-medium text-white mt-1 truncate">
-                {user.institution.name}
+                {user?.first_name ? `${user.first_name} ${user.last_name || ''}` : user?.username}
               </div>
               <div className="text-[11px] text-slate-400 font-mono mt-0.5">
-                ID: {user.institution.aicte_id}
+                Role: {user?.role_display || user?.role}
               </div>
             </div>
+          ) : (
+            user?.institution && (
+              <div className="bg-slate-800/60 p-3 rounded-lg border border-slate-700/50">
+                <div className="flex items-center space-x-2 text-xs text-[#e09f3e] font-semibold uppercase tracking-wider">
+                  <Building2 className="w-3.5 h-3.5" />
+                  <span>Institute Portal</span>
+                </div>
+                <div className="text-sm font-medium text-white mt-1 truncate">
+                  {user.institution.name}
+                </div>
+                <div className="text-[11px] text-slate-400 font-mono mt-0.5">
+                  ID: {user.institution.aicte_id}
+                </div>
+              </div>
+            )
           )}
 
           {/* Nav Items */}
@@ -120,3 +180,4 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
     </>
   );
 };
+

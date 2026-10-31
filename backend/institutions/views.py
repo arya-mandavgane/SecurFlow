@@ -131,3 +131,39 @@ class InstitutionViewSet(viewsets.ModelViewSet):
             "success": True,
             "data": serializer.data
         })
+
+    @extend_schema(
+        tags=['Institutions'],
+        summary='Get Complete Institution FDR History & Document Repository',
+        description='Fetches all historical FDRs, active deposit totals, and document repository for a specific institution.'
+    )
+    @action(detail=True, methods=['get'], url_path='fdrs', permission_classes=[permissions.IsAuthenticated, IsOwnerInstitutionOrOfficial])
+    def fdr_history(self, request, pk=None):
+        institution = self.get_object()
+        from fdrs.models import FDR, FDRDocument
+        from fdrs.serializers import FDRDetailSerializer, FDRDocumentSerializer
+        from django.db.models import Sum
+
+        fdrs = FDR.objects.filter(institution=institution).select_related('parent_fdr').prefetch_related('documents', 'verification_records').order_by('-created_at')
+        total_value = fdrs.aggregate(sum=Sum('amount'))['sum'] or 0
+        active_value = fdrs.filter(status__in=[FDR.Status.ACTIVE, FDR.Status.VERIFIED]).aggregate(sum=Sum('amount'))['sum'] or 0
+
+        documents = FDRDocument.objects.filter(fdr__institution=institution).select_related('uploaded_by').order_by('-upload_timestamp')
+
+        fdr_serializer = FDRDetailSerializer(fdrs, many=True, context={'request': request})
+        doc_serializer = FDRDocumentSerializer(documents, many=True, context={'request': request})
+
+        return Response({
+            "success": True,
+            "data": {
+                "institution": self.get_serializer(institution).data,
+                "summary": {
+                    "total_fdrs": fdrs.count(),
+                    "total_pledged_value": float(total_value),
+                    "active_value": float(active_value),
+                    "document_count": documents.count()
+                },
+                "fdrs": fdr_serializer.data,
+                "documents": doc_serializer.data
+            }
+        })

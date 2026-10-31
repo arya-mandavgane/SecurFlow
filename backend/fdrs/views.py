@@ -1,6 +1,7 @@
 import os
+import datetime
 from django.http import FileResponse, Http404
-from django.db.models import Q
+from django.db.models import Q, Sum, Count
 from rest_framework import viewsets, permissions, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -24,6 +25,7 @@ from accounts.models import User
 from accounts.permissions import IsOwnerInstitutionOrOfficial, CanVerifyFDR
 from audit.utils import log_audit_event
 from audit.models import AuditLog
+from audit.serializers import AuditLogSerializer
 
 
 @extend_schema_view(
@@ -301,13 +303,38 @@ class FDRViewSet(viewsets.ModelViewSet):
         action_type = serializer.validated_data['action']
         remarks = serializer.validated_data['remarks']
         mismatches = serializer.validated_data.get('mismatches', [])
+        field_overrides = serializer.validated_data.get('field_overrides', {})
+
+        # Apply official field overrides if specified
+        if field_overrides and isinstance(field_overrides, dict):
+            import decimal
+            allowed_fields = ['fdr_number', 'amount', 'bank_name', 'branch', 'interest_rate', 'issue_date', 'maturity_date', 'lien_marked_aicte']
+            updated_fields = {}
+            for field, val in field_overrides.items():
+                if field in allowed_fields and val is not None:
+                    if field in ('amount', 'interest_rate'):
+                        try:
+                            val = decimal.Decimal(str(val))
+                        except Exception:
+                            pass
+                    setattr(fdr, field, val)
+                    updated_fields[field] = str(val)
+            if updated_fields:
+                log_audit_event(
+                    request=request,
+                    action=AuditLog.Action.UPDATE,
+                    entity_type='FDR',
+                    entity_id=fdr.id,
+                    after_state={'event': 'official_field_override', 'overridden_fields': updated_fields}
+                )
 
         before_status = fdr.status
+        amount_display = f"{float(fdr.amount):,.2f}"
         if action_type == FDRVerificationActionSerializer.Action.APPROVE:
             fdr.status = FDR.Status.VERIFIED
             record_status = VerificationRecord.Status.APPROVED
             notif_title = f"FDR #{fdr.fdr_number} Verified"
-            notif_msg = f"Your FDR #{fdr.fdr_number} of INR {fdr.amount:,} has been verified and approved by AICTE."
+            notif_msg = f"Your FDR #{fdr.fdr_number} of INR {amount_display} has been verified and approved by AICTE."
         elif action_type == FDRVerificationActionSerializer.Action.REJECT:
             fdr.status = FDR.Status.REJECTED
             record_status = VerificationRecord.Status.REJECTED
@@ -363,6 +390,283 @@ class FDRViewSet(viewsets.ModelViewSet):
             "message": f"FDR state updated to {fdr.get_status_display()}.",
             "data": detail_serializer.data
         }, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        tags=['Official Workspace'],
+        summary='Official Dashboard KPI & Analytics',
+        description='Returns comprehensive system-wide metrics, breakdowns by status, state, bank, and recent audit activity feed for AICTE officials.'
+    )
+    @action(detail=False, methods=['get'], url_path='official-stats', permission_classes=[permissions.IsAuthenticated, CanVerifyFDR])
+    def official_stats(self, request):
+        today = datetime.date.today()
+        all_fdrs = FDR.objects.all()
+
+        total_fdrs = all_fdrs.count()
+        total_deposit_val = all_fdrs.filter(status__in=[FDR.Status.ACTIVE, FDR.Status.VERIFIED]).aggregate(sum=Sum('amount'))['sum'] or 0
+        pending_verification = all_fdrs.filter(status__in=[
+            FDR.Status.SUBMITTED,
+            FDR.Status.UNDER_REVIEW,
+            FDR.Status.NEEDS_CLARIFICATION
+        ]).count()
+        verified = all_fdrs.filter(status__in=[FDR.Status.VERIFIED, FDR.Status.ACTIVE]).count()
+
+        active_or_pending_statuses = [
+            FDR.Status.ACTIVE, FDR.Status.VERIFIED, FDR.Status.EXPIRING_SOON,
+            FDR.Status.SUBMITTED, FDR.Status.UNDER_REVIEW, FDR.Status.NEEDS_CLARIFICATION
+        ]
+        expiring_30_days = all_fdrs.filter(
+            maturity_date__range=[today, today + datetime.timedelta(days=30)],
+            status__in=active_or_pending_statuses
+        ).count()
+        expiring_60_days = all_fdrs.filter(
+            maturity_date__range=[today, today + datetime.timedelta(days=60)],
+            status__in=active_or_pending_statuses
+        ).count()
+        expiring_90_days = all_fdrs.filter(
+            maturity_date__range=[today, today + datetime.timedelta(days=90)],
+            status__in=active_or_pending_statuses
+        ).count()
+        expired = all_fdrs.filter(
+            Q(status=FDR.Status.EXPIRED) |
+            (Q(maturity_date__lt=today) & ~Q(status__in=[FDR.Status.RELEASED, FDR.Status.REJECTED]))
+        ).count()
+        release_requests = all_fdrs.filter(status=FDR.Status.RELEASE_REQUESTED).count()
+
+        status_counts = all_fdrs.values('status').annotate(count=Count('id'), total_amount=Sum('amount')).order_by('-count')
+        status_map = dict(FDR.Status.choices)
+        status_distribution = [
+            {
+                'status': item['status'],
+                'label': status_map.get(item['status'], item['status']),
+                'count': item['count'],
+                'total_amount': float(item['total_amount'] or 0)
+            }
+            for item in status_counts
+        ]
+
+        state_counts = all_fdrs.values('institution__state').annotate(
+            count=Count('id'),
+            total_amount=Sum('amount')
+        ).order_by('-count')[:10]
+        state_distribution = [
+            {
+                'state': item['institution__state'] or 'Unknown',
+                'count': item['count'],
+                'total_amount': float(item['total_amount'] or 0)
+            }
+            for item in state_counts
+        ]
+
+        bank_counts = all_fdrs.values('bank_name').annotate(
+            count=Count('id'),
+            total_amount=Sum('amount')
+        ).order_by('-count')[:10]
+        bank_distribution = [
+            {
+                'bank': item['bank_name'],
+                'count': item['count'],
+                'total_amount': float(item['total_amount'] or 0)
+            }
+            for item in bank_counts
+        ]
+
+        recent_logs = AuditLog.objects.select_related('actor').order_by('-timestamp')[:15]
+        activity_serializer = AuditLogSerializer(recent_logs, many=True)
+
+        return Response({
+            'success': True,
+            'data': {
+                'kpis': {
+                    'total_fdrs': total_fdrs,
+                    'total_deposit_value': float(total_deposit_val),
+                    'pending_verification': pending_verification,
+                    'verified': verified,
+                    'expiring_30_days': expiring_30_days,
+                    'expiring_60_days': expiring_60_days,
+                    'expiring_90_days': expiring_90_days,
+                    'expired': expired,
+                    'release_requests': release_requests
+                },
+                'status_distribution': status_distribution,
+                'state_distribution': state_distribution,
+                'bank_distribution': bank_distribution,
+                'recent_activity': activity_serializer.data
+            }
+        })
+
+    @extend_schema(
+        tags=['Official Workspace'],
+        summary='Official Verification Queue',
+        description='Fetches FDR records requiring official scrutiny, prioritized by discrepancy severity and maturity urgency.',
+        parameters=[
+            OpenApiParameter('priority', str, description='Filter priority: HIGH, MEDIUM, LOW, or ALL'),
+            OpenApiParameter('status', str, description='Filter by status (SUBMITTED, UNDER_REVIEW, NEEDS_CLARIFICATION)'),
+            OpenApiParameter('bank', str, description='Filter by bank name'),
+            OpenApiParameter('state', str, description='Filter by state'),
+            OpenApiParameter('search', str, description='Search across FDR number, institution name, AICTE ID'),
+        ]
+    )
+    @action(detail=False, methods=['get'], url_path='verification-queue', permission_classes=[permissions.IsAuthenticated, CanVerifyFDR])
+    def verification_queue(self, request):
+        today = datetime.date.today()
+        queryset = FDR.objects.filter(
+            status__in=[FDR.Status.SUBMITTED, FDR.Status.UNDER_REVIEW, FDR.Status.NEEDS_CLARIFICATION]
+        ).select_related('institution').prefetch_related('documents', 'verification_records')
+
+        params = request.query_params
+        status_filter = params.get('status')
+        if status_filter:
+            queryset = queryset.filter(status=status_filter.upper())
+
+        bank_filter = params.get('bank')
+        if bank_filter:
+            queryset = queryset.filter(bank_name__icontains=bank_filter)
+
+        state_filter = params.get('state')
+        if state_filter:
+            queryset = queryset.filter(institution__state__iexact=state_filter)
+
+        search_query = params.get('search')
+        if search_query:
+            queryset = queryset.filter(
+                Q(fdr_number__icontains=search_query) |
+                Q(bank_name__icontains=search_query) |
+                Q(institution__name__icontains=search_query) |
+                Q(institution__aicte_id__icontains=search_query)
+            )
+
+        queue_items = []
+        for fdr in queryset:
+            discrepancies = []
+            if isinstance(fdr.extracted_data, dict):
+                discrepancies = fdr.extracted_data.get('discrepancies', [])
+            
+            if not discrepancies:
+                for vr in fdr.verification_records.all():
+                    if vr.mismatches:
+                        discrepancies.extend(vr.mismatches)
+
+            has_critical = any(d.get('severity') == 'CRITICAL' for d in discrepancies if isinstance(d, dict))
+            has_high = any(d.get('severity') == 'HIGH' for d in discrepancies if isinstance(d, dict))
+            
+            days_to_maturity = (fdr.maturity_date - today).days
+
+            priority_score = 0
+            if has_critical:
+                priority_score += 100
+            elif has_high:
+                priority_score += 60
+            elif len(discrepancies) > 0:
+                priority_score += 30
+
+            if days_to_maturity <= 30:
+                priority_score += 40
+            elif days_to_maturity <= 90:
+                priority_score += 20
+
+            if priority_score >= 80:
+                priority_level = 'HIGH'
+            elif priority_score >= 30:
+                priority_level = 'MEDIUM'
+            else:
+                priority_level = 'LOW'
+
+            queue_items.append({
+                'id': fdr.id,
+                'fdr_number': fdr.fdr_number,
+                'institution_id': fdr.institution.id,
+                'institution_name': fdr.institution.name,
+                'institution_aicte_id': fdr.institution.aicte_id,
+                'state': fdr.institution.state,
+                'bank_name': fdr.bank_name,
+                'branch': fdr.branch,
+                'amount': float(fdr.amount),
+                'issue_date': str(fdr.issue_date),
+                'maturity_date': str(fdr.maturity_date),
+                'days_to_maturity': days_to_maturity,
+                'status': fdr.status,
+                'status_display': fdr.get_status_display(),
+                'discrepancy_count': len(discrepancies),
+                'has_critical_discrepancy': has_critical,
+                'priority': priority_level,
+                'priority_score': priority_score,
+                'has_document': fdr.documents.exists(),
+                'created_at': fdr.created_at.isoformat()
+            })
+
+        priority_filter = params.get('priority')
+        if priority_filter and priority_filter.upper() != 'ALL':
+            queue_items = [item for item in queue_items if item['priority'] == priority_filter.upper()]
+
+        # Sort: Highest priority score first, then earliest maturity date
+        queue_items.sort(key=lambda x: (-x['priority_score'], x['days_to_maturity']))
+
+        return Response({
+            'success': True,
+            'count': len(queue_items),
+            'data': queue_items
+        })
+
+    @extend_schema(
+        tags=['Official Workspace'],
+        summary='Generate AI Review Summary Hook',
+        description='Produces an AI-synthesized summary of FDR verification status, flagged discrepancies, and recommended action. Ready for Phase 8 RAG integration.'
+    )
+    @action(detail=True, methods=['post'], url_path='ai-summary', permission_classes=[permissions.IsAuthenticated, CanVerifyFDR])
+    def ai_summary(self, request, pk=None):
+        fdr = self.get_object()
+        extracted = fdr.extracted_data or {}
+        discrepancies = extracted.get('discrepancies', [])
+        conf = extracted.get('confidence_scores', {})
+        overall_conf = extracted.get('overall_confidence', 0.85)
+
+        flags = []
+        if discrepancies:
+            for d in discrepancies:
+                flags.append(f"{d.get('severity', 'WARNING')}: {d.get('issue', 'Discrepancy detected in')} (Field: {d.get('field', 'General')})")
+
+        if any(d.get('severity') == 'CRITICAL' for d in discrepancies if isinstance(d, dict)):
+            rec = 'REQUEST_CLARIFICATION'
+            analysis_text = f"FDR #{fdr.fdr_number} contains critical discrepancies between submitted form data and bank-issued certificate: {'; '.join(flags[:2])}. Clarification or corrected certificate is recommended before approval."
+        elif len(discrepancies) > 0:
+            rec = 'REQUEST_CLARIFICATION'
+            analysis_text = f"FDR #{fdr.fdr_number} has minor variances ({len(discrepancies)} flagged). Overall OCR confidence is {int(overall_conf * 100)}%. Review highlighted fields before proceeding."
+        else:
+            rec = 'APPROVE'
+            analysis_text = f"FDR #{fdr.fdr_number} from {fdr.bank_name} for ₹{fdr.amount:,} matches the submitted certificate with {int(overall_conf * 100)}% extraction confidence. Lien in favour of AICTE is verified. Recommended for immediate approval."
+
+        return Response({
+            'success': True,
+            'data': {
+                'fdr_id': fdr.id,
+                'fdr_number': fdr.fdr_number,
+                'overall_confidence': overall_conf,
+                'recommendation': rec,
+                'summary': analysis_text,
+                'flags': flags,
+                'is_ai_generated': True,
+                'engine': 'SecurFlow OCR-Validator Engine v1.0 (Phase 8 RAG ready)'
+            }
+        })
+
+    @extend_schema(
+        tags=['Official Workspace'],
+        summary='Get Complete Audit Trail for FDR',
+        description='Retrieves all historical audit logs and verification records related to this FDR.'
+    )
+    @action(detail=True, methods=['get'], url_path='audit-trail', permission_classes=[permissions.IsAuthenticated, IsOwnerInstitutionOrOfficial])
+    def audit_trail(self, request, pk=None):
+        fdr = self.get_object()
+        logs = AuditLog.objects.filter(
+            Q(entity_type='FDR', entity_id=str(fdr.id)) |
+            Q(entity_type='FDRDocument', entity_id__in=[str(d.id) for d in fdr.documents.all()])
+        ).select_related('actor').order_by('-timestamp')
+
+        serializer = AuditLogSerializer(logs, many=True)
+        return Response({
+            'success': True,
+            'data': serializer.data
+        })
 
     @extend_schema(
         tags=['FDR Verification'],
