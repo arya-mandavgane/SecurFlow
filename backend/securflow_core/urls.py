@@ -9,6 +9,11 @@ urlpatterns = [
     # System & Health
     path('api/health/', health_check, name='health-check'),
 
+    # Core Phase 2 APIs
+    path('api/auth/', include('accounts.urls')),
+    path('api/institutions/', include('institutions.urls')),
+    path('api/fdrs/', include('fdrs.urls')),
+
     # OpenAPI 3 Schema & UI
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
     path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
