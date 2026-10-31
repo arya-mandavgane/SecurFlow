@@ -185,3 +185,7 @@ CELERY_TIMEZONE = TIME_ZONE
 # Microservice Endpoints
 AI_SERVICE_URL = os.getenv('AI_SERVICE_URL', 'http://ai-service:8001')
 OCR_SERVICE_URL = os.getenv('OCR_SERVICE_URL', 'http://ocr-service:8002')
+
+# Email Configuration (Console backend for dev, SMTP configurable via env)
+EMAIL_BACKEND = os.getenv('EMAIL_BACKEND', 'django.core.mail.backends.console.EmailBackend' if DEBUG else 'django.core.mail.backends.smtp.EmailBackend')
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'noreply@securflow.aicte.gov.in')

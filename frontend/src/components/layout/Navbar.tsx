@@ -1,6 +1,7 @@
 import React from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { LogOut, Bell, Building } from 'lucide-react';
+import { LogOut, Building } from 'lucide-react';
+import { NotificationDropdown } from './NotificationDropdown';
 
 interface NavbarProps {
   onToggleSidebar?: () => void;
@@ -51,14 +52,8 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
             </div>
           )}
 
-          {/* Notification Bell */}
-          <button
-            className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-800 rounded-full transition relative"
-            title="Notifications"
-          >
-            <Bell className="w-4 h-4" />
-            <span className="absolute top-1 right-1 w-2 h-2 bg-amber-500 rounded-full animate-ping"></span>
-          </button>
+          {/* Notification Center */}
+          <NotificationDropdown />
 
           {/* User Badge */}
           <div className="flex items-center space-x-2 pl-2 border-l border-slate-700">

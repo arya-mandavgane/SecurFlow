@@ -167,15 +167,24 @@ export const FDRDetailPage: React.FC = () => {
           </div>
         </div>
 
-        {fdr.status === 'NEEDS_CLARIFICATION' && (
-          <button
-            onClick={() => setShowClarificationModal(true)}
-            className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2.5 rounded-lg text-xs font-bold shadow animate-pulse flex items-center space-x-1.5"
+        <div className="flex items-center space-x-2">
+          {fdr.status === 'NEEDS_CLARIFICATION' && (
+            <button
+              onClick={() => setShowClarificationModal(true)}
+              className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2.5 rounded-lg text-xs font-bold shadow animate-pulse flex items-center space-x-1.5"
+            >
+              <AlertCircle className="w-4 h-4" />
+              <span>Respond to Clarification</span>
+            </button>
+          )}
+          <Link
+            to="/renewals-releases"
+            className="bg-slate-100 hover:bg-slate-200 text-[#0d3b66] px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center space-x-1.5 border border-slate-300 transition"
           >
-            <AlertCircle className="w-4 h-4" />
-            <span>Respond to Clarification</span>
-          </button>
-        )}
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>Renewals & Lineage</span>
+          </Link>
+        </div>
       </div>
 
       {/* Official Clarification Banner if Applicable */}

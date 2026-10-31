@@ -335,6 +335,21 @@ class FDRViewSet(viewsets.ModelViewSet):
             record_status = VerificationRecord.Status.APPROVED
             notif_title = f"FDR #{fdr.fdr_number} Verified"
             notif_msg = f"Your FDR #{fdr.fdr_number} of INR {amount_display} has been verified and approved by AICTE."
+
+            # If this is a renewal, mark parent FDR as RENEWED
+            if fdr.parent_fdr and fdr.parent_fdr.status != FDR.Status.RENEWED:
+                parent = fdr.parent_fdr
+                parent_old_status = parent.status
+                parent.status = FDR.Status.RENEWED
+                parent.save(update_fields=['status', 'updated_at'])
+                log_audit_event(
+                    request=request,
+                    action=AuditLog.Action.STATUS_CHANGE,
+                    entity_type='FDR',
+                    entity_id=parent.id,
+                    before_state={'status': parent_old_status},
+                    after_state={'status': FDR.Status.RENEWED, 'renewal_fdr_id': fdr.id}
+                )
         elif action_type == FDRVerificationActionSerializer.Action.REJECT:
             fdr.status = FDR.Status.REJECTED
             record_status = VerificationRecord.Status.REJECTED
