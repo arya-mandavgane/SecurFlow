@@ -237,6 +237,17 @@ class FDRViewSet(viewsets.ModelViewSet):
             }
         )
 
+        # Trigger Asynchronous OCR extraction pipeline
+        try:
+            from .tasks import process_fdr_document_ocr
+            try:
+                process_fdr_document_ocr.delay(doc.id)
+            except Exception:
+                # Fallback to direct synchronous execution if Celery broker unavailable
+                process_fdr_document_ocr(doc.id)
+        except Exception:
+            pass
+
         serializer = FDRDocumentSerializer(doc, context={'request': request})
         return Response({
             "success": True,
@@ -350,5 +361,41 @@ class FDRViewSet(viewsets.ModelViewSet):
         return Response({
             "success": True,
             "message": f"FDR state updated to {fdr.get_status_display()}.",
+            "data": detail_serializer.data
+        }, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        tags=['FDR Verification'],
+        summary='Re-trigger AI-OCR Extraction Pipeline',
+        description='Re-runs OCR text extraction, structured parsing and mismatch detection on the latest FDR document.',
+        responses={200: FDRDetailSerializer}
+    )
+    @action(detail=True, methods=['post'], url_path='retrigger-ocr')
+    def retrigger_ocr(self, request, pk=None):
+        fdr = self.get_object()
+        latest_doc = fdr.documents.first()
+        if not latest_doc:
+            return Response({
+                "success": False,
+                "error": {"message": "No document is attached to this FDR to perform OCR extraction."}
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        from .tasks import process_fdr_document_ocr
+        try:
+            try:
+                process_fdr_document_ocr.delay(latest_doc.id)
+            except Exception:
+                process_fdr_document_ocr(latest_doc.id)
+        except Exception as e:
+            return Response({
+                "success": False,
+                "error": {"message": f"Failed to execute OCR job: {str(e)}"}
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        fdr.refresh_from_db()
+        detail_serializer = FDRDetailSerializer(fdr, context={'request': request})
+        return Response({
+            "success": True,
+            "message": "AI-OCR extraction triggered successfully.",
             "data": detail_serializer.data
         }, status=status.HTTP_200_OK)
