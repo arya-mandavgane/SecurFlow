@@ -115,3 +115,33 @@ export interface ApiError {
     details?: any;
   };
 }
+
+export type ReleaseRequestStatus =
+  | 'REQUESTED'
+  | 'UNDER_REVIEW'
+  | 'APPROVED'
+  | 'REJECTED'
+  | 'MORE_INFO_NEEDED'
+  | 'RELEASED';
+
+export interface ReleaseRequest {
+  id: number;
+  fdr: number;
+  fdr_number: string;
+  institution_id?: number;
+  institution_name?: string;
+  institution_aicte_id?: string;
+  bank_name?: string;
+  amount?: number | string;
+  reason: string;
+  status: ReleaseRequestStatus;
+  status_display: string;
+  requested_by_name?: string;
+  official_remarks?: string;
+  decided_by_name?: string;
+  refund_order_number?: string;
+  decision_date?: string;
+  download_order_url?: string;
+  created_at: string;
+  updated_at?: string;
+}

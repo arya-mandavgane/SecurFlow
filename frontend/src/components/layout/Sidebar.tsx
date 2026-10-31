@@ -8,7 +8,8 @@ import {
   AlertCircle,
   Building2,
   ShieldAlert,
-  ShieldCheck
+  ShieldCheck,
+  FileCheck2
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -71,6 +72,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
       to: '/official/institutions',
       label: 'Institutions Master',
       icon: Building2,
+      badge: null,
+    },
+    {
+      to: '/official/releases',
+      label: 'Release Approvals',
+      icon: FileCheck2,
       badge: null,
     },
     {

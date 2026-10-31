@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { apiClient } from '../../api/client';
-import { FDR } from '../../types';
+import { FDR, ReleaseRequest } from '../../types';
 import {
   RefreshCw,
   CheckCircle2,
@@ -9,7 +9,10 @@ import {
   GitBranch,
   Layers,
   X,
-  ShieldAlert
+  ShieldAlert,
+  Download,
+  FileCheck2,
+  PlusCircle
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
@@ -33,6 +36,7 @@ interface LineageNode {
 
 export const RenewalsReleasesPage: React.FC = () => {
   const [fdrs, setFdrs] = useState<FDR[]>([]);
+  const [releaseRequests, setReleaseRequests] = useState<ReleaseRequest[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [activeTab, setActiveTab] = useState<'renewals' | 'calendar' | 'releases'>('renewals');
 
@@ -58,8 +62,21 @@ export const RenewalsReleasesPage: React.FC = () => {
   const [lineageLoading, setLineageLoading] = useState<boolean>(false);
   const [activeLineageFdrNum, setActiveLineageFdrNum] = useState<string>('');
 
+  // Release Request Modal
+  const [showRaiseReleaseModal, setShowRaiseReleaseModal] = useState<boolean>(false);
+  const [releaseFdrId, setReleaseFdrId] = useState<number | ''>('');
+  const [releaseReason, setReleaseReason] = useState<string>('');
+  const [isSubmittingRelease, setIsSubmittingRelease] = useState<boolean>(false);
+  const [releaseSuccess, setReleaseSuccess] = useState<string | null>(null);
+
+  // Release Clarification Modal
+  const [clarifyingReq, setClarifyingReq] = useState<ReleaseRequest | null>(null);
+  const [clarificationText, setClarificationText] = useState<string>('');
+  const [isSubmittingClarification, setIsSubmittingClarification] = useState<boolean>(false);
+
   useEffect(() => {
     fetchFDRs();
+    fetchReleaseRequests();
   }, []);
 
   const fetchFDRs = async () => {
@@ -74,6 +91,19 @@ export const RenewalsReleasesPage: React.FC = () => {
     }
   };
 
+  const fetchReleaseRequests = async () => {
+    try {
+      const res = await apiClient.get('/releases/');
+      if (res.data?.results) {
+        setReleaseRequests(res.data.results);
+      } else if (Array.isArray(res.data)) {
+        setReleaseRequests(res.data);
+      }
+    } catch {
+      // ignore
+    }
+  };
+
   const handleOpenRenewalModal = (fdr: FDR) => {
     setSelectedParentFdr(fdr);
     setRenewalType('RENEWAL');
@@ -83,7 +113,6 @@ export const RenewalsReleasesPage: React.FC = () => {
     setAmount(String(fdr.amount));
     setInterestRate(fdr.interest_rate ? String(fdr.interest_rate) : '7.00');
     setIssueDate(new Date().toISOString().split('T')[0]);
-    // Default maturity 1 year from now
     const d = new Date();
     d.setFullYear(d.getFullYear() + 1);
     setMaturityDate(d.toISOString().split('T')[0]);
@@ -146,15 +175,72 @@ export const RenewalsReleasesPage: React.FC = () => {
     }
   };
 
+  const handleRaiseReleaseRequest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!releaseFdrId || !releaseReason.trim()) {
+      alert('Please select an eligible FDR deposit and provide justification.');
+      return;
+    }
+    setIsSubmittingRelease(true);
+    setReleaseSuccess(null);
+
+    try {
+      const res = await apiClient.post('/releases/', {
+        fdr_id: releaseFdrId,
+        reason: releaseReason.trim(),
+      });
+      if (res.data?.success) {
+        setReleaseSuccess('Lien release request logged successfully! AICTE regional bureau will review your request.');
+        setTimeout(() => {
+          setShowRaiseReleaseModal(false);
+          setReleaseSuccess(null);
+          setReleaseFdrId('');
+          setReleaseReason('');
+          fetchReleaseRequests();
+          fetchFDRs();
+        }, 2000);
+      }
+    } catch (err: any) {
+      alert(err?.response?.data?.error?.message || err?.response?.data?.fdr_id?.[0] || 'Failed to submit release request.');
+    } finally {
+      setIsSubmittingRelease(false);
+    }
+  };
+
+  const handleClarificationSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!clarifyingReq || !clarificationText.trim()) return;
+
+    setIsSubmittingClarification(true);
+    try {
+      const res = await apiClient.post(`/releases/${clarifyingReq.id}/resubmit-info/`, {
+        additional_info: clarificationText.trim(),
+      });
+      if (res.data?.success) {
+        alert('Clarification successfully submitted. Request moved back to Under Review.');
+        setClarifyingReq(null);
+        setClarificationText('');
+        fetchReleaseRequests();
+      }
+    } catch (err: any) {
+      alert(err?.response?.data?.error?.message || 'Failed to submit clarification.');
+    } finally {
+      setIsSubmittingClarification(false);
+    }
+  };
+
   const today = new Date();
   const getDaysLeft = (matDate: string) => {
     const diff = new Date(matDate).getTime() - today.getTime();
     return Math.ceil(diff / (1000 * 60 * 60 * 24));
   };
 
-  // Filter FDRs for renewals and calendar
   const eligibleForRenewal = fdrs.filter((f) =>
     ['ACTIVE', 'EXPIRING_SOON', 'EXPIRED', 'VERIFIED'].includes(f.status)
+  );
+
+  const eligibleForRelease = fdrs.filter((f) =>
+    ['ACTIVE', 'VERIFIED'].includes(f.status)
   );
 
   const filteredByMaturity = eligibleForRenewal.filter((f) => {
@@ -173,18 +259,21 @@ export const RenewalsReleasesPage: React.FC = () => {
         <div>
           <div className="flex items-center space-x-2">
             <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#0d3b66]/10 text-[#0d3b66]">
-              Continuous Compliance
+              Continuous Compliance & Lifecycle
             </span>
-            <span className="text-xs text-slate-500 font-mono">Renewal Chain & Expiry Watch</span>
+            <span className="text-xs text-slate-500 font-mono">Maturity • Renewals • Releases</span>
           </div>
-          <h1 className="text-2xl font-bold text-slate-900 mt-1">FDR Renewals & Maturity Tracking</h1>
+          <h1 className="text-2xl font-bold text-slate-900 mt-1">FDR Renewals & Lien Release Gateway</h1>
           <p className="text-sm text-slate-600 mt-0.5">
-            Monitor upcoming deposit maturities, submit linked renewals, and audit full multi-year lineage chains.
+            Monitor upcoming deposit maturities, submit linked renewals, and track digital lien release & refund orders.
           </p>
         </div>
 
         <button
-          onClick={fetchFDRs}
+          onClick={() => {
+            fetchFDRs();
+            fetchReleaseRequests();
+          }}
           className="flex items-center space-x-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-sm font-medium transition self-start sm:self-auto"
         >
           <RefreshCw className="w-4 h-4" />
@@ -193,10 +282,10 @@ export const RenewalsReleasesPage: React.FC = () => {
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b border-slate-200 bg-white px-4 rounded-t-xl">
+      <div className="flex border-b border-slate-200 bg-white px-4 rounded-t-xl overflow-x-auto">
         <button
           onClick={() => setActiveTab('renewals')}
-          className={`py-3.5 px-6 text-xs font-bold border-b-2 flex items-center space-x-2 transition ${
+          className={`py-3.5 px-6 text-xs font-bold border-b-2 flex items-center space-x-2 whitespace-nowrap transition ${
             activeTab === 'renewals'
               ? 'border-[#0d3b66] text-[#0d3b66]'
               : 'border-transparent text-slate-500 hover:text-slate-800'
@@ -208,7 +297,7 @@ export const RenewalsReleasesPage: React.FC = () => {
 
         <button
           onClick={() => setActiveTab('calendar')}
-          className={`py-3.5 px-6 text-xs font-bold border-b-2 flex items-center space-x-2 transition ${
+          className={`py-3.5 px-6 text-xs font-bold border-b-2 flex items-center space-x-2 whitespace-nowrap transition ${
             activeTab === 'calendar'
               ? 'border-[#0d3b66] text-[#0d3b66]'
               : 'border-transparent text-slate-500 hover:text-slate-800'
@@ -216,6 +305,18 @@ export const RenewalsReleasesPage: React.FC = () => {
         >
           <Calendar className="w-3.5 h-3.5" />
           <span>Maturity Radar (30/60/90 Days)</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('releases')}
+          className={`py-3.5 px-6 text-xs font-bold border-b-2 flex items-center space-x-2 whitespace-nowrap transition ${
+            activeTab === 'releases'
+              ? 'border-[#0d3b66] text-[#0d3b66]'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <CheckCircle2 className="w-3.5 h-3.5" />
+          <span>Lien Release & Refund Orders ({releaseRequests.length})</span>
         </button>
       </div>
 
@@ -255,7 +356,6 @@ export const RenewalsReleasesPage: React.FC = () => {
             </div>
           </div>
 
-          {/* FDR List */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
             {loading ? (
               <div className="p-12 text-center text-xs text-slate-500">Loading FDRs...</div>
@@ -353,7 +453,7 @@ export const RenewalsReleasesPage: React.FC = () => {
         </div>
       )}
 
-      {/* Tab 2: Maturity Calendar / Radar */}
+      {/* Tab 2: Maturity Calendar */}
       {activeTab === 'calendar' && (
         <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-100 pb-4">
@@ -364,7 +464,6 @@ export const RenewalsReleasesPage: React.FC = () => {
               </p>
             </div>
 
-            {/* Quick Filter Buttons */}
             <div className="flex flex-wrap items-center gap-1.5 text-xs">
               {(['ALL', '30', '60', '90', 'EXPIRED'] as const).map((filter) => (
                 <button
@@ -386,7 +485,6 @@ export const RenewalsReleasesPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Cards for Filtered Items */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {filteredByMaturity.map((fdr) => {
               const days = getDaysLeft(fdr.maturity_date);
@@ -453,6 +551,254 @@ export const RenewalsReleasesPage: React.FC = () => {
         </div>
       )}
 
+      {/* Tab 3: Lien Release / Refund Gateway */}
+      {activeTab === 'releases' && (
+        <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+            <div>
+              <h2 className="text-base font-bold text-slate-900">Digital Security Deposit Release & Refund Gateway</h2>
+              <p className="text-xs text-slate-500">
+                Track status of security deposit release requests, download official AICTE release orders, and respond to committee queries.
+              </p>
+            </div>
+
+            <button
+              onClick={() => setShowRaiseReleaseModal(true)}
+              className="flex items-center space-x-2 px-4 py-2 bg-[#0d3b66] hover:bg-[#001e3d] text-white rounded-lg text-xs font-bold shadow-xs transition"
+            >
+              <PlusCircle className="w-4 h-4" />
+              <span>Raise Release Request</span>
+            </button>
+          </div>
+
+          {/* Release Tracking Table */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+            {releaseRequests.length === 0 ? (
+              <div className="p-12 text-center text-xs text-slate-500 space-y-2">
+                <FileCheck2 className="w-10 h-10 text-slate-400 mx-auto" />
+                <p className="font-semibold text-slate-700">No Release Requests Lodged</p>
+                <p>Eligible verified or active deposits can be released once institutional obligations are fulfilled.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-slate-50 text-slate-600 border-b border-slate-200 font-semibold uppercase">
+                      <th className="py-3 px-4">Request Ref</th>
+                      <th className="py-3 px-4">FDR Identifier</th>
+                      <th className="py-3 px-4 text-right">Amount (INR)</th>
+                      <th className="py-3 px-4">Reason / Justification</th>
+                      <th className="py-3 px-4">Current Status</th>
+                      <th className="py-3 px-4 text-center">Release Order Letter</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {releaseRequests.map((req) => (
+                      <tr key={req.id} className="hover:bg-slate-50 transition">
+                        <td className="py-3 px-4 whitespace-nowrap">
+                          <span className="font-bold text-[#0d3b66]">REL-REQ-{req.id.toString().padStart(4, '0')}</span>
+                          <span className="text-[10px] text-slate-400 block font-mono">
+                            {new Date(req.created_at).toLocaleDateString('en-IN')}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 whitespace-nowrap">
+                          <div className="font-bold text-slate-800">#{req.fdr_number}</div>
+                          <div className="text-[11px] text-slate-500">{req.bank_name}</div>
+                        </td>
+                        <td className="py-3 px-4 text-right font-bold text-slate-900 whitespace-nowrap">
+                          ₹{Number(req.amount).toLocaleString('en-IN')}
+                        </td>
+                        <td className="py-3 px-4">
+                          <p className="line-clamp-2 text-slate-600 text-[11px] max-w-[240px]" title={req.reason}>
+                            {req.reason}
+                          </p>
+                        </td>
+                        <td className="py-3 px-4 whitespace-nowrap">
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                              req.status === 'APPROVED' || req.status === 'RELEASED'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : req.status === 'MORE_INFO_NEEDED'
+                                ? 'bg-purple-100 text-purple-800'
+                                : req.status === 'REJECTED'
+                                ? 'bg-red-100 text-red-800'
+                                : 'bg-blue-100 text-blue-800'
+                            }`}
+                          >
+                            {req.status_display}
+                          </span>
+                          {req.status === 'MORE_INFO_NEEDED' && (
+                            <button
+                              onClick={() => {
+                                setClarifyingReq(req);
+                                setClarificationText('');
+                              }}
+                              className="text-[10px] text-purple-700 underline font-semibold block mt-0.5"
+                            >
+                              Provide Info &rarr;
+                            </button>
+                          )}
+                        </td>
+                        <td className="py-3 px-4 text-center whitespace-nowrap">
+                          {req.download_order_url ? (
+                            <a
+                              href={req.download_order_url}
+                              download
+                              className="inline-flex items-center space-x-1 px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-semibold shadow-xs transition"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                              <span>Download PDF</span>
+                            </a>
+                          ) : (
+                            <span className="text-[11px] text-slate-400 italic">Generated on approval</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Raise Release Request Modal */}
+      {showRaiseReleaseModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] overflow-hidden flex flex-col shadow-2xl border border-slate-200">
+            <div className="p-5 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+              <h2 className="text-base font-bold text-slate-900">Raise Lien Release / Refund Request</h2>
+              <button
+                onClick={() => setShowRaiseReleaseModal(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleRaiseReleaseRequest} className="p-6 overflow-y-auto space-y-4 flex-1 text-xs">
+              {releaseSuccess && (
+                <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-3 rounded-lg font-semibold flex items-center space-x-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  <span>{releaseSuccess}</span>
+                </div>
+              )}
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Select Eligible FDR Deposit <span className="text-red-500">*</span>
+                </label>
+                <select
+                  required
+                  value={releaseFdrId}
+                  onChange={(e) => setReleaseFdrId(Number(e.target.value) || '')}
+                  className="w-full p-2 border border-slate-300 rounded text-xs bg-white"
+                >
+                  <option value="">-- Choose verified/active FDR --</option>
+                  {eligibleForRelease.map((fdr) => (
+                    <option key={fdr.id} value={fdr.id}>
+                      #{fdr.fdr_number} • {fdr.bank_name} (₹{Number(fdr.amount).toLocaleString('en-IN')})
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Only deposits in Active or Verified status with satisfied compliance obligations can be selected.
+                </p>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Reason & Obligation Fulfilment Justification <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  required
+                  rows={4}
+                  value={releaseReason}
+                  onChange={(e) => setReleaseReason(e.target.value)}
+                  placeholder="Detail academic obligation completion, expiry of mandatory lock-in period, closure of course, or replacement..."
+                  className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-1 focus:ring-[#0d3b66]"
+                />
+              </div>
+
+              <div className="pt-3 border-t border-slate-200 flex items-center justify-end space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setShowRaiseReleaseModal(false)}
+                  className="px-4 py-2 border border-slate-300 rounded text-slate-700 hover:bg-slate-100"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingRelease}
+                  className="px-4 py-2 bg-[#0d3b66] hover:bg-[#001e3d] text-white rounded font-bold shadow-xs disabled:opacity-50"
+                >
+                  {isSubmittingRelease ? 'Submitting...' : 'Submit Release Request'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Clarification Response Modal */}
+      {clarifyingReq && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] overflow-hidden flex flex-col shadow-2xl border border-slate-200">
+            <div className="p-5 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+              <h2 className="text-base font-bold text-slate-900">
+                Respond to Clarification: REL-REQ-{clarifyingReq.id.toString().padStart(4, '0')}
+              </h2>
+              <button
+                onClick={() => setClarifyingReq(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleClarificationSubmit} className="p-6 overflow-y-auto space-y-4 flex-1 text-xs">
+              <div className="bg-amber-50 p-3 rounded-lg border border-amber-200 text-amber-900">
+                <span className="font-bold">Official Remarks / Query:</span>
+                <p className="mt-1 text-slate-700">{clarifyingReq.official_remarks || 'Additional information needed.'}</p>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Institutional Clarification / Response <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  required
+                  rows={4}
+                  value={clarificationText}
+                  onChange={(e) => setClarificationText(e.target.value)}
+                  placeholder="Provide detailed clarification addressing the official query..."
+                  className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-1 focus:ring-[#0d3b66]"
+                />
+              </div>
+
+              <div className="pt-3 border-t border-slate-200 flex items-center justify-end space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setClarifyingReq(null)}
+                  className="px-4 py-2 border border-slate-300 rounded text-slate-700 hover:bg-slate-100"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingClarification}
+                  className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded font-bold shadow-xs disabled:opacity-50"
+                >
+                  {isSubmittingClarification ? 'Submitting...' : 'Submit Clarification'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Renewal Submission Modal */}
       {selectedParentFdr && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
@@ -480,7 +826,6 @@ export const RenewalsReleasesPage: React.FC = () => {
                 </div>
               )}
 
-              {/* Renewal Type Radio */}
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">Renewal Classification</label>
                 <div className="grid grid-cols-2 gap-2">
@@ -520,7 +865,6 @@ export const RenewalsReleasesPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* New FDR Number */}
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">New FDR Certificate Number *</label>
                 <input
@@ -532,7 +876,6 @@ export const RenewalsReleasesPage: React.FC = () => {
                 />
               </div>
 
-              {/* Bank & Branch */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">Issuing Bank *</label>
@@ -556,7 +899,6 @@ export const RenewalsReleasesPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Amount & Interest */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">Deposit Amount (INR) *</label>
@@ -581,7 +923,6 @@ export const RenewalsReleasesPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Dates */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">Renewal / Issue Date *</label>
@@ -605,7 +946,6 @@ export const RenewalsReleasesPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Reason */}
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">Renewal Justification / Notes</label>
                 <textarea
@@ -637,7 +977,7 @@ export const RenewalsReleasesPage: React.FC = () => {
         </div>
       )}
 
-      {/* Visual Renewal Lineage Chain Modal */}
+      {/* Visual Lineage Chain Modal */}
       {lineageChain && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[85vh] overflow-hidden flex flex-col shadow-2xl border border-slate-200">
@@ -664,7 +1004,6 @@ export const RenewalsReleasesPage: React.FC = () => {
                 <div className="relative border-l-2 border-[#0d3b66]/30 ml-4 pl-6 space-y-6">
                   {lineageChain.map((node) => (
                     <div key={node.id} className="relative">
-                      {/* Node Bullet */}
                       <div
                         className={`absolute -left-[31px] top-1.5 w-4 h-4 rounded-full border-2 bg-white ${
                           node.is_current

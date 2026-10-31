@@ -15,6 +15,7 @@ urlpatterns = [
     path('api/fdrs/', include('fdrs.urls')),
     path('api/notifications/', include('notifications.urls')),
     path('api/renewals/', include('renewals.urls')),
+    path('api/releases/', include('releases.urls')),
 
     # OpenAPI 3 Schema & UI
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),

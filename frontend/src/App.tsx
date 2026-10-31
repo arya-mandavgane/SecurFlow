@@ -12,6 +12,7 @@ import { OfficialDashboardPage } from './pages/official/OfficialDashboardPage';
 import { VerificationQueuePage } from './pages/official/VerificationQueuePage';
 import { SmartVerificationPage } from './pages/official/SmartVerificationPage';
 import { InstitutionsPage } from './pages/official/InstitutionsPage';
+import { ReleaseEvaluationPage } from './pages/official/ReleaseEvaluationPage';
 
 const DashboardRedirector: React.FC = () => {
   const { user } = useAuth();
@@ -46,6 +47,7 @@ export default function App() {
               <Route path="/official/verification-queue" element={<VerificationQueuePage />} />
               <Route path="/official/verify/:id" element={<SmartVerificationPage />} />
               <Route path="/official/institutions" element={<InstitutionsPage />} />
+              <Route path="/official/releases" element={<ReleaseEvaluationPage />} />
             </Route>
           </Route>
 

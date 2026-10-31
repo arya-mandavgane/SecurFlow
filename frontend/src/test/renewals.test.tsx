@@ -14,7 +14,7 @@ describe('Phase 6 Renewals and Maturity Tests', () => {
       </AuthProvider>
     );
 
-    expect(screen.getByText(/FDR Renewals & Maturity Tracking/i)).toBeInTheDocument();
+    expect(screen.getByText(/FDR Renewals & Lien Release Gateway/i)).toBeInTheDocument();
     expect(screen.getByText(/Maturity Radar \(30\/60\/90 Days\)/i)).toBeInTheDocument();
     expect(screen.getByText(/Renewals & Replacement/i)).toBeInTheDocument();
   });
