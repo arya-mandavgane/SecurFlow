@@ -28,10 +28,8 @@ export default function App() {
       {/* Top Header */}
       <header className="bg-[#001e3d] border-b-4 border-[#e09f3e] text-white px-6 py-4 shadow-md">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div className="flex items-center space-x-4">
-            <div className="h-10 w-10 rounded-full bg-[#e09f3e] flex items-center justify-center font-bold text-[#001e3d] text-xl shadow">
-              SF
-            </div>
+          <div className="flex items-center space-x-3">
+            <img src="/logo.png" alt="SecurFlow Logo" className="h-11 bg-white/95 px-2.5 py-1 rounded-md shadow object-contain" />
             <div>
               <h1 className="text-xl font-bold tracking-tight">SecurFlow</h1>
               <p className="text-xs text-slate-300">AICTE Security Deposit & FDR Management Portal</p>
@@ -46,6 +44,7 @@ export default function App() {
 
       {/* Hero Body */}
       <main className="max-w-7xl mx-auto px-6 py-12 flex-1 w-full flex flex-col items-center justify-center text-center">
+        <img src="/logo.png" alt="SecurFlow Logo" className="h-20 mb-6 drop-shadow-md rounded-xl bg-white p-2.5 border border-slate-200 object-contain" />
         <div className="inline-block px-3.5 py-1 mb-4 text-xs font-semibold uppercase tracking-wider text-blue-900 bg-blue-100 rounded-full">
           Phase 1 Foundation Ready
         </div>
